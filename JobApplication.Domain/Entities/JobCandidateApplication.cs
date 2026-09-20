@@ -18,11 +18,14 @@ namespace JobApplication.Domain.Entities
         public JobApplicationStatus JobApplicationStatus { get; set; }
         public DateTime AppliedAt { get; set; }
         public DateTime StatusUpdatedAt { get; set; }
+        public string CvUrl { get; set; } = string.Empty;
+        public DateTime? CancelledAt { get; set; }
 
         public JobCandidateApplication()
         {
             JobApplicationStatus = JobApplicationStatus.Applied;
             AppliedAt = DateTime.UtcNow;
+            StatusUpdatedAt = AppliedAt;
         }
 
 
@@ -33,17 +36,32 @@ namespace JobApplication.Domain.Entities
             [JobApplicationStatus.InterView] = new[] { JobApplicationStatus.Accepted, JobApplicationStatus.Rejected },
             [JobApplicationStatus.Accepted] = Array.Empty<JobApplicationStatus>(),
             [JobApplicationStatus.Rejected] = Array.Empty<JobApplicationStatus>(),
+            [JobApplicationStatus.Cancelled] = Array.Empty<JobApplicationStatus>(),
         };
 
         public void UpdateStatus(JobApplicationStatus newStatus)
         {
             if (!AllowedTransitions[JobApplicationStatus].Contains(newStatus))
             {
-                throw new Exception($"Cannot change status from '{JobApplicationStatus}' to '{newStatus}'."); 
+                throw new InvalidOperationException($"Cannot change status from '{JobApplicationStatus}' to '{newStatus}'."); 
             }
 
             JobApplicationStatus = newStatus;
             StatusUpdatedAt = DateTime.UtcNow;
+        }
+
+        // Only Applied / UnderReview can be cancelled. The row is kept (never deleted) and cannot be reopened.
+        public void Cancel()
+        {
+            if (JobApplicationStatus != JobApplicationStatus.Applied &&
+                JobApplicationStatus != JobApplicationStatus.UnderReview)
+            {
+                throw new InvalidOperationException($"Cannot cancel an application in status '{JobApplicationStatus}'.");
+            }
+
+            JobApplicationStatus = JobApplicationStatus.Cancelled;
+            CancelledAt = DateTime.UtcNow;
+            StatusUpdatedAt = CancelledAt.Value;
         }
     }
 }

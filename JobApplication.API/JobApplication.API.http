@@ -1,6 +1,409 @@
-@JobApplication.API_HostAddress = http://localhost:5018
+@host = https://localhost:7237
 
-GET {{JobApplication.API_HostAddress}}/weatherforecast/
-Accept: application/json
+### 1) Register
+# @name register
+POST {{host}}/api/auth/register
+Content-Type: application/json
 
-###
+{
+  "fullName": "Shahd Test",
+  "email": "shahd.test@example.com",
+  "password": "Test@1234",
+  "role": "Candidate"
+}
+
+### 2) Login
+# @name login
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "shahd.test@example.com",
+  "password": "Test@1234"
+}
+
+### 3) Call a protected endpoint with the token from step 2
+GET {{host}}/api/auth/me
+Authorization: Bearer {{login.response.body.$.token}}
+
+### 4) Same call WITHOUT a token (must return 401)
+GET {{host}}/api/auth/me
+
+
+############################################################
+# TESTS - Authorization + Apply / Close / Cancel
+# Run the requests from TOP to BOTTOM (each one uses ids/tokens of the previous ones).
+# If the users already exist, the register calls return 400 - ignore it and continue to login.
+# "expect" = the status code you should get.
+############################################################
+
+### Register Recruiter A
+# @name regRecruiterA
+POST {{host}}/api/auth/register
+Content-Type: application/json
+
+{ "fullName": "Recruiter A", "email": "recruiter.a@example.com", "password": "Test@1234", "role": "Recruiter" }
+
+### Login Recruiter A
+# @name loginRecruiterA
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "recruiter.a@example.com", "password": "Test@1234" }
+
+### Register Recruiter B
+# @name regRecruiterB
+POST {{host}}/api/auth/register
+Content-Type: application/json
+
+{ "fullName": "Recruiter B", "email": "recruiter.b@example.com", "password": "Test@1234", "role": "Recruiter" }
+
+### Login Recruiter B
+# @name loginRecruiterB
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "recruiter.b@example.com", "password": "Test@1234" }
+
+### Register Candidate A
+# @name regCandA
+POST {{host}}/api/auth/register
+Content-Type: application/json
+
+{ "fullName": "Candidate A", "email": "candidate.a@example.com", "password": "Test@1234", "role": "Candidate" }
+
+### Login Candidate A
+# @name loginCandA
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "candidate.a@example.com", "password": "Test@1234" }
+
+### Register Candidate B
+# @name regCandB
+POST {{host}}/api/auth/register
+Content-Type: application/json
+
+{ "fullName": "Candidate B", "email": "candidate.b@example.com", "password": "Test@1234", "role": "Candidate" }
+
+### Login Candidate B
+# @name loginCandB
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "candidate.b@example.com", "password": "Test@1234" }
+
+### Create job: J1 open job  (Recruiter A)
+# @name job1
+POST {{host}}/api/jobs
+Authorization: Bearer {{loginRecruiterA.response.body.$.token}}
+Content-Type: application/json
+
+{ "title": "J1 open job", "description": "test job" }
+
+### Create job: J2 job to be closed  (Recruiter A)
+# @name job2
+POST {{host}}/api/jobs
+Authorization: Bearer {{loginRecruiterA.response.body.$.token}}
+Content-Type: application/json
+
+{ "title": "J2 job to be closed", "description": "test job" }
+
+### Create job: J3 cancel Applied  (Recruiter A)
+# @name job3
+POST {{host}}/api/jobs
+Authorization: Bearer {{loginRecruiterA.response.body.$.token}}
+Content-Type: application/json
+
+{ "title": "J3 cancel Applied", "description": "test job" }
+
+### Create job: J4 cancel UnderReview  (Recruiter A)
+# @name job4
+POST {{host}}/api/jobs
+Authorization: Bearer {{loginRecruiterA.response.body.$.token}}
+Content-Type: application/json
+
+{ "title": "J4 cancel UnderReview", "description": "test job" }
+
+### Create job: J5 cancel Interview  (Recruiter A)
+# @name job5
+POST {{host}}/api/jobs
+Authorization: Bearer {{loginRecruiterA.response.body.$.token}}
+Content-Type: application/json
+
+{ "title": "J5 cancel Interview", "description": "test job" }
+
+############ TEST 1: Apply on an open job ############
+
+### TEST 1 - Candidate A applies to J1 (Open)
+# expect: 201 + Status Applied
+# @name t1
+POST {{host}}/api/applications
+Authorization: Bearer {{loginCandA.response.body.$.token}}
+Content-Type: multipart/form-data; boundary=cvboundary
+
+--cvboundary
+Content-Disposition: form-data; name="JobId"
+
+{{job1.response.body.$.id}}
+--cvboundary
+Content-Disposition: form-data; name="cv"; filename="cv.pdf"
+Content-Type: application/pdf
+
+%PDF-1.4 fake cv for testing
+--cvboundary--
+
+### TEST 1 - my applications (Status = Applied)
+# expect: 200
+GET {{host}}/api/applications/my
+Authorization: Bearer {{loginCandA.response.body.$.token}}
+
+############ TEST 3: Duplicate apply ############
+
+### TEST 3 - Candidate A applies to J1 AGAIN
+# expect: 400
+# @name t3
+POST {{host}}/api/applications
+Authorization: Bearer {{loginCandA.response.body.$.token}}
+Content-Type: multipart/form-data; boundary=cvboundary
+
+--cvboundary
+Content-Disposition: form-data; name="JobId"
+
+{{job1.response.body.$.id}}
+--cvboundary
+Content-Disposition: form-data; name="cv"; filename="cv.pdf"
+Content-Type: application/pdf
+
+%PDF-1.4 fake cv for testing
+--cvboundary--
+
+############ TEST 4 / 2 / 6: Close job ############
+
+### TEST 4 - Recruiter A closes his own job J2
+# expect: 200 + Status Closed + ClosedAt
+# @name t4
+DELETE {{host}}/api/jobs/{{job2.response.body.$.id}}
+Authorization: Bearer {{loginRecruiterA.response.body.$.token}}
+
+### J2 details (Status = Closed)
+# expect: 200
+GET {{host}}/api/jobs/{{job2.response.body.$.id}}
+Authorization: Bearer {{loginCandA.response.body.$.token}}
+
+### TEST 2 - Candidate A applies to the CLOSED job J2
+# expect: 400
+# @name t2
+POST {{host}}/api/applications
+Authorization: Bearer {{loginCandA.response.body.$.token}}
+Content-Type: multipart/form-data; boundary=cvboundary
+
+--cvboundary
+Content-Disposition: form-data; name="JobId"
+
+{{job2.response.body.$.id}}
+--cvboundary
+Content-Disposition: form-data; name="cv"; filename="cv.pdf"
+Content-Type: application/pdf
+
+%PDF-1.4 fake cv for testing
+--cvboundary--
+
+### TEST 6 - close J2 again (already Closed)
+# expect: 400
+DELETE {{host}}/api/jobs/{{job2.response.body.$.id}}
+Authorization: Bearer {{loginRecruiterA.response.body.$.token}}
+
+############ TEST 5: Recruiter closes another recruiter's job ############
+
+### TEST 5 - Recruiter B tries to close J1 (owned by A)
+# expect: 403
+DELETE {{host}}/api/jobs/{{job1.response.body.$.id}}
+Authorization: Bearer {{loginRecruiterB.response.body.$.token}}
+
+############ Role / anonymous checks ############
+
+### Anonymous applies (no token)
+# expect: 401
+# @name x1
+POST {{host}}/api/applications
+Content-Type: multipart/form-data; boundary=cvboundary
+
+--cvboundary
+Content-Disposition: form-data; name="JobId"
+
+{{job1.response.body.$.id}}
+--cvboundary
+Content-Disposition: form-data; name="cv"; filename="cv.pdf"
+Content-Type: application/pdf
+
+%PDF-1.4 fake cv for testing
+--cvboundary--
+
+### Recruiter applies (wrong role)
+# expect: 403
+# @name x2
+POST {{host}}/api/applications
+Authorization: Bearer {{loginRecruiterA.response.body.$.token}}
+Content-Type: multipart/form-data; boundary=cvboundary
+
+--cvboundary
+Content-Disposition: form-data; name="JobId"
+
+{{job1.response.body.$.id}}
+--cvboundary
+Content-Disposition: form-data; name="cv"; filename="cv.pdf"
+Content-Type: application/pdf
+
+%PDF-1.4 fake cv for testing
+--cvboundary--
+
+### Candidate tries to close a job (wrong role)
+# expect: 403
+DELETE {{host}}/api/jobs/{{job1.response.body.$.id}}
+Authorization: Bearer {{loginCandA.response.body.$.token}}
+
+### Anonymous tries to close a job
+# expect: 401
+DELETE {{host}}/api/jobs/{{job1.response.body.$.id}}
+
+### Recruiter A - my jobs
+# expect: 200
+GET {{host}}/api/jobs/my-jobs
+Authorization: Bearer {{loginRecruiterA.response.body.$.token}}
+
+### Candidate A - open jobs (J2 must NOT be listed)
+# expect: 200
+GET {{host}}/api/jobs
+Authorization: Bearer {{loginCandA.response.body.$.token}}
+
+############ TEST 7: Cancel Applied / UnderReview ############
+
+### TEST 7a - Candidate A applies to J3
+# expect: 201
+# @name t7a
+POST {{host}}/api/applications
+Authorization: Bearer {{loginCandA.response.body.$.token}}
+Content-Type: multipart/form-data; boundary=cvboundary
+
+--cvboundary
+Content-Disposition: form-data; name="JobId"
+
+{{job3.response.body.$.id}}
+--cvboundary
+Content-Disposition: form-data; name="cv"; filename="cv.pdf"
+Content-Type: application/pdf
+
+%PDF-1.4 fake cv for testing
+--cvboundary--
+
+### TEST 7a - cancel an Applied application
+# expect: 200 + Status Cancelled + CancelledAt
+# @name t7aCancel
+DELETE {{host}}/api/applications/{{t7a.response.body.$.id}}
+Authorization: Bearer {{loginCandA.response.body.$.token}}
+
+### Cancel the same application again
+# expect: 400
+DELETE {{host}}/api/applications/{{t7a.response.body.$.id}}
+Authorization: Bearer {{loginCandA.response.body.$.token}}
+
+### TEST 7b - Candidate A applies to J4
+# expect: 201
+# @name t7b
+POST {{host}}/api/applications
+Authorization: Bearer {{loginCandA.response.body.$.token}}
+Content-Type: multipart/form-data; boundary=cvboundary
+
+--cvboundary
+Content-Disposition: form-data; name="JobId"
+
+{{job4.response.body.$.id}}
+--cvboundary
+Content-Disposition: form-data; name="cv"; filename="cv.pdf"
+Content-Type: application/pdf
+
+%PDF-1.4 fake cv for testing
+--cvboundary--
+
+### Recruiter A moves it to UnderReview
+# expect: 200
+PATCH {{host}}/api/applications/{{t7b.response.body.$.id}}/UnderReview
+Authorization: Bearer {{loginRecruiterA.response.body.$.token}}
+
+### TEST 7b - cancel an UnderReview application
+# expect: 200 + Status Cancelled
+DELETE {{host}}/api/applications/{{t7b.response.body.$.id}}
+Authorization: Bearer {{loginCandA.response.body.$.token}}
+
+############ TEST 8 / 9: Cancel Interview, cancel someone else's ############
+
+### TEST 8 - Candidate A applies to J5
+# expect: 201
+# @name t8
+POST {{host}}/api/applications
+Authorization: Bearer {{loginCandA.response.body.$.token}}
+Content-Type: multipart/form-data; boundary=cvboundary
+
+--cvboundary
+Content-Disposition: form-data; name="JobId"
+
+{{job5.response.body.$.id}}
+--cvboundary
+Content-Disposition: form-data; name="cv"; filename="cv.pdf"
+Content-Type: application/pdf
+
+%PDF-1.4 fake cv for testing
+--cvboundary--
+
+### Recruiter A -> UnderReview
+# expect: 200
+PATCH {{host}}/api/applications/{{t8.response.body.$.id}}/UnderReview
+Authorization: Bearer {{loginRecruiterA.response.body.$.token}}
+
+### Recruiter A -> InterView
+# expect: 200
+PATCH {{host}}/api/applications/{{t8.response.body.$.id}}/InterView
+Authorization: Bearer {{loginRecruiterA.response.body.$.token}}
+
+### TEST 8 - cancel an InterView application
+# expect: 400
+DELETE {{host}}/api/applications/{{t8.response.body.$.id}}
+Authorization: Bearer {{loginCandA.response.body.$.token}}
+
+### TEST 9 - Candidate B cancels Candidate A's application
+# expect: 403
+DELETE {{host}}/api/applications/{{t8.response.body.$.id}}
+Authorization: Bearer {{loginCandB.response.body.$.token}}
+
+### Recruiter tries to cancel an application (wrong role)
+# expect: 403
+DELETE {{host}}/api/applications/{{t8.response.body.$.id}}
+Authorization: Bearer {{loginRecruiterA.response.body.$.token}}
+
+### Cancel an application that does not exist
+# expect: 404
+DELETE {{host}}/api/applications/999999
+Authorization: Bearer {{loginCandA.response.body.$.token}}
+
+############ TEST 10: Old applications stay after Close ############
+
+### Recruiter A closes J1 (it has Candidate A's application)
+# expect: 200 + Status Closed
+DELETE {{host}}/api/jobs/{{job1.response.body.$.id}}
+Authorization: Bearer {{loginRecruiterA.response.body.$.token}}
+
+### TEST 10 - Recruiter A still sees J1 applications (Status = Applied, not rejected/deleted)
+# expect: 200 + 1 application
+GET {{host}}/api/jobs/{{job1.response.body.$.id}}/applications
+Authorization: Bearer {{loginRecruiterA.response.body.$.token}}
+
+### TEST 10 - Candidate A still sees his application on the closed job
+# expect: 200
+GET {{host}}/api/applications/my
+Authorization: Bearer {{loginCandA.response.body.$.token}}
+
+### Recruiter B lists applications of A's job
+# expect: 403
+GET {{host}}/api/jobs/{{job1.response.body.$.id}}/applications
+Authorization: Bearer {{loginRecruiterB.response.body.$.token}}
