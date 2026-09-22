@@ -2,10 +2,10 @@ using System.Text;
 using JobApplication.API.Services;
 using JobApplication.Application.Common;
 using JobApplication.Application.Interfaces;
-using JobApplication.Application.Services;
 using JobApplication.Infrastructure.Auth;
 using JobApplication.Infrastructure.Persistence;
 using JobApplication.Infrastructure.Repositories;
+using MediatR;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -31,10 +31,12 @@ namespace JobApplication.API
             builder.Services.AddDbContext<ApplicationDbContext>(options =>
                 options.UseSqlServer(connectionString));
 
-            builder.Services.AddScoped<IJobService, JobService>();
-            builder.Services.AddScoped<IJobCandidateApplicationService, JobCandidateApplicationService>();
             builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
             builder.Services.AddScoped<ICvStorage, LocalCvStorage>();
+
+            // ---------- CQRS / MediatR ----------
+            builder.Services.AddMediatR(cfg =>
+                cfg.RegisterServicesFromAssembly(typeof(JobApplication.Application.AssemblyReference).Assembly));
 
             // ---------- Identity (users + passwords) ----------
             builder.Services
@@ -91,8 +93,7 @@ namespace JobApplication.API
 
             builder.Services.AddAuthorization();
 
-            // ---------- Auth use case + its Infrastructure implementations ----------
-            builder.Services.AddScoped<AuthService>();
+            // ---------- Auth use case Infrastructure implementations (consumed directly by the Auth handlers) ----------
             builder.Services.AddScoped<IIdentityService, IdentityService>();
             builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
 
