@@ -1,4 +1,6 @@
 using System.Text;
+using Hangfire;
+using JobApplication.API.BackgroundJobs;
 using JobApplication.API.Services;
 using JobApplication.Application.Common;
 using JobApplication.Application.Interfaces;
@@ -97,6 +99,20 @@ namespace JobApplication.API
             builder.Services.AddScoped<IIdentityService, IdentityService>();
             builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
 
+            // ---------- Hangfire (background + recurring jobs, stored in the same SQL Server database) ----------
+            // Hangfire creates its own tables under the [HangFire] schema on first run - they are NOT part of EF migrations.
+            builder.Services.AddHangfire(config => config
+                .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+                .UseSimpleAssemblyNameTypeSerializer()
+                .UseRecommendedSerializerSettings()
+                .UseSqlServerStorage(connectionString));
+            builder.Services.AddHangfireServer(); // the worker that actually runs the jobs
+
+            // Auto-close settings + the job class Hangfire will call
+            builder.Services.Configure<JobAutoCloseSettings>(
+                builder.Configuration.GetSection(JobAutoCloseSettings.SectionName));
+            builder.Services.AddScoped<CloseStaleJobsJob>();
+
             // ---------- Swagger (with an "Authorize" button for the JWT) ----------
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen(options =>
@@ -141,6 +157,25 @@ namespace JobApplication.API
             // Order matters: who are you? (authentication) BEFORE are you allowed? (authorization)
             app.UseAuthentication();
             app.UseAuthorization();
+
+            // Hangfire Dashboard -> /hangfire (by default only reachable from localhost).
+            // It must come before AddOrUpdate below: it is what initialises Hangfire's storage.
+            app.UseHangfireDashboard("/hangfire");
+
+            // ---------- Recurring job: auto-close jobs that stayed open too long ----------
+            var autoClose = builder.Configuration
+                .GetSection(JobAutoCloseSettings.SectionName)
+                .Get<JobAutoCloseSettings>() ?? new JobAutoCloseSettings();
+
+            if (autoClose.MaxOpenDays <= 0)
+                throw new InvalidOperationException("JobAutoClose:MaxOpenDays must be greater than 0.");
+
+            // AddOrUpdate = create the job if the id is new, otherwise update its schedule.
+            // Safe to run on every app start: it never creates duplicates.
+            RecurringJob.AddOrUpdate<CloseStaleJobsJob>(
+                JobAutoCloseSettings.RecurringJobId,
+                job => job.RunAsync(CancellationToken.None), // Hangfire swaps in a real token at run time
+                autoClose.Cron);
 
             app.MapControllers();
 
