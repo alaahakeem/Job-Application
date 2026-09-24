@@ -11,6 +11,7 @@ namespace JobApplication.Domain.Entities
         public string Title { get; set; }
         public string Description  { get; set; }
         public JobStatus Status { get; set; } = JobStatus.Open;
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? ClosedAt { get; set; }
         public string? RecruiterId { get; set; }
 

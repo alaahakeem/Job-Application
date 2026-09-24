@@ -29,6 +29,12 @@ namespace JobApplication.Infrastructure.Persistence
                 .HasForeignKey(j => j.RecruiterId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            // When the job was posted. Existing rows get "now" (the moment the migration ran),
+            // so old jobs are NOT auto-closed the second this feature is deployed.
+            builder.Entity<Job>()
+                .Property(j => j.CreatedAt)
+                .HasDefaultValueSql("GETUTCDATE()");
+
             // Candidate profile <-> user account (one profile per user).
             builder.Entity<Candidate>()
                 .HasOne<ApplicationUser>()
